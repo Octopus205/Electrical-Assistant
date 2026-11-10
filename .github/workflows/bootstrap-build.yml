@@ -1,10 +1,11 @@
-name: Bootstrap and Build Android APK
+name: Electrical Assistant - Debug APK
 
 on:
   push:
     branches: [main]
     paths:
       - "Electrical-Assistant-GitHub-Ready.zip"
+      - "scripts/quality-fixes.py.gz.b64"
       - ".github/workflows/bootstrap-build.yml"
   workflow_dispatch:
 
@@ -18,20 +19,33 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Android project
+      - name: Verify and extract Android project
+        shell: bash
         run: |
+          set -euo pipefail
           test -s Electrical-Assistant-GitHub-Ready.zip
+          test -s scripts/quality-fixes.py.gz.b64
           mkdir -p .project-src
           unzip -q Electrical-Assistant-GitHub-Ready.zip -d .project-src
           test -f .project-src/settings.gradle.kts
           test -f .project-src/app/build.gradle.kts
           cp -a .project-src/. .
           rm -rf .project-src
+
+      - name: Apply engineering, AI and PDF quality fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode scripts/quality-fixes.py.gz.b64 | gzip -dc > scripts/apply_quality_fixes.py
+          python scripts/apply_quality_fixes.py
+          test -f app/src/main/java/com/example/ui/ElectricalViewModel.kt
+          test -f app/src/main/java/com/example/network/GeminiClient.kt
+          test -f app/src/main/java/com/example/util/PdfGenerator.kt
 
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -54,13 +68,18 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Run unit tests
+        run: gradle --no-daemon testDebugUnitTest --stacktrace
+
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug --stacktrace
 
-      - name: Upload debug APK
+      - name: Upload APK and patched source
         uses: actions/upload-artifact@v4
         with:
           name: Electrical-Assistant-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/mapping/debug/**
           if-no-files-found: error
           retention-days: 14
