@@ -1,0 +1,66 @@
+name: Bootstrap and Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Electrical-Assistant-GitHub-Ready.zip"
+      - ".github/workflows/bootstrap-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: electrical-assistant-debug-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract Android project
+        run: |
+          test -s Electrical-Assistant-GitHub-Ready.zip
+          mkdir -p .project-src
+          unzip -q Electrical-Assistant-GitHub-Ready.zip -d .project-src
+          test -f .project-src/settings.gradle.kts
+          test -f .project-src/app/build.gradle.kts
+          cp -a .project-src/. .
+          rm -rf .project-src
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Generate temporary debug signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.3.1"
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Electrical-Assistant-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
